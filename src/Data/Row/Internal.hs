@@ -14,7 +14,6 @@
 {-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE UndecidableInstances #-}
 {-# LANGUAGE UndecidableSuperClasses, QuantifiedConstraints #-}
-{-# LANGUAGE StandaloneKindSignatures #-}
 -----------------------------------------------------------------------------
 -- |
 -- Module      :  Data.Row.Internal
@@ -274,7 +273,6 @@ instance (KnownSymbol ℓ, c ℓ τ, ForallX ('R ρ) c, FrontExtends ℓ τ ('R 
       cons (Label @ℓ) . first (metamorphX @_ @('R ρ) @c h empty uncons cons) . uncons (Label @ℓ)
 
 -- | A constraint used to implement @Forall@.  
-type ForallC :: forall k. Row k -> (k -> Constraint) -> Symbol -> k -> Constraint 
 class (HasType l t r, c t) => ForallC r c l t 
 instance (HasType l t r, c t) => ForallC r c l t 
 

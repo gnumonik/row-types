@@ -10,8 +10,6 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE TypeOperators #-}
-{-# LANGUAGE StandaloneKindSignatures #-}
-{-# LANGUAGE UndecidableSuperClasses #-}
 -----------------------------------------------------------------------------
 -- |
 -- Module      :  Data.Row.Dictionaries
@@ -75,7 +73,7 @@ import Data.Kind
 -- variable.  Particularly, it says that for the type 'a', there exists a 't'
 -- such that @a ~ f t@ and @c t@ holds.
 data As c f a where
-  As :: forall k (c :: k -> Constraint) (f :: k -> Type) (a :: Type) (t :: k). (a ~ f t, c t) => As c f a
+  As :: forall  c f (a :: *) t. (a ~ f t, c t) => As c f a -- ghc needs the kind annotation on a for mapForallX to typecheck
 
 -- | A class to capture the idea of 'As' so that it can be partially applied in
 -- a context.
@@ -107,7 +105,6 @@ unForall :: forall k (r :: Row k) (c :: k -> Constraint). Forall r c :- ForallX 
 unForall = Sub Dict 
 
 -- | An internal type used by the 'metamorphX' in 'mapForallX'.
-type MapForallX :: forall k. (k -> Constraint) -> (k -> Type) -> Row k -> Row k -> Type 
 newtype MapForallX c f p r  = MapForallX {unMapForallX :: Dict (ForallX (Map f r) (ForallC (Map f p) (IsA c f))) }
 
 -- | An internal type used by the 'metamorphX' in 'apSingleForallX'.
@@ -148,7 +145,7 @@ apSingleForallX = unmapDict (\d -> unApSingleForallX (go @c @a @fs) \\ d) -- usi
     go :: forall (c :: (k1 -> k2) -> Constraint) (a :: k1) (fs :: Row (k1 -> k2))
         . ForallX fs (ForallC fs c) 
        => ApSingleForallX c a fs fs 
-    go = metamorphX @_ @fs @(ForallC fs c) @Const @Proxy @(ApSingleForallX c a fs) @Proxy Proxy empty uncons cons $ Proxy
+    go = metamorphX @_ @fs @(ForallC fs c) @Const @Proxy @(ApSingleForallX c a fs) @Proxy Proxy empty uncons cons Proxy
       where 
         empty _ = ApSingleForallX Dict 
         
