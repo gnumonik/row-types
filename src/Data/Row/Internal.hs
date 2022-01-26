@@ -13,7 +13,8 @@
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE UndecidableInstances #-}
-{-# LANGUAGE UndecidableSuperClasses #-}
+{-# LANGUAGE UndecidableSuperClasses, QuantifiedConstraints #-}
+{-# LANGUAGE StandaloneKindSignatures #-}
 -----------------------------------------------------------------------------
 -- |
 -- Module      :  Data.Row.Internal
@@ -40,6 +41,9 @@ module Data.Row.Internal
   -- * Row Constraints
   , Lacks, type (.\), HasType
   , Forall(..)
+  , ForallX(..)
+  , ForallC
+  , forall
   , BiForall(..)
   , BiConstraint
   , Unconstrained
@@ -64,12 +68,11 @@ import Data.Proxy
 import Data.String (IsString (fromString))
 import Data.Text (Text)
 import qualified Data.Text as Text
-import Data.Type.Equality (type (==))
+import Data.Type.Equality (type (==),type  (:~:) (Refl))
 
 import GHC.OverloadedLabels
 import GHC.TypeLits
 import qualified GHC.TypeLits as TL
-
 
 
 
@@ -240,40 +243,87 @@ instance (r ~ R ρ, R (l :-> t ': ρ) ≈ Extend l t (R ρ), AllUniqueLabelsR (l
   frontExtendsDict = FrontExtendsDict Dict
 
 
--- | Any structure over a row in which every element is similarly constrained can
--- be metamorphized into another structure over the same row.
-class Forall (r :: Row k) (c :: k -> Constraint) where
-  -- | A metamorphism is an anamorphism (an unfold) followed by a catamorphism (a fold).
-  -- The parameter 'p' describes the output of the unfold and the input of the fold.
-  -- For records, @p = (,)@, because every entry in the row will unfold to a value paired
-  -- with the rest of the record.
-  -- For variants, @p = Either@, because there will either be a value or future types to
-  -- explore.
-  -- 'Const' can be useful when the types in the row are unnecessary.
-  metamorph :: forall (p :: * -> * -> *) (f :: Row k -> *) (g :: Row k -> *) (h :: k -> *). Bifunctor p
+-- you could shove this into Data.Row.Internal
+class ForallX (r :: Row k) (c :: Symbol -> k -> Constraint) -- (c' :: Symbol -> Constraint) 
+  where
+  metamorphX :: forall (p :: * -> * -> *) 
+                       (f :: Row k -> *) 
+                       (g :: Row k -> *) 
+                       (h :: k -> *)
+             . Bifunctor p
             => Proxy (Proxy h, Proxy p)
             -> (f Empty -> g Empty)
                -- ^ The way to transform the empty element
-            -> (forall ℓ τ ρ. (KnownSymbol ℓ, c τ, HasType ℓ τ ρ)
+            -> (forall ℓ τ ρ. (KnownSymbol ℓ, c ℓ τ, HasType ℓ τ ρ)
                => Label ℓ -> f ρ -> p (f (ρ .- ℓ)) (h τ))
                -- ^ The unfold
+            -> (forall ℓ τ ρ. (KnownSymbol ℓ, c ℓ τ, FrontExtends ℓ τ ρ, AllUniqueLabels (Extend ℓ τ ρ))
+               => Label ℓ -> p (g ρ) (h τ) -> g (Extend ℓ τ ρ))
+               -- ^ The fold   
+            -> f r  -- ^ The input structure
+            -> g r 
+
+instance ForallX (R '[]) c  where
+  {-# INLINE metamorphX #-}
+  metamorphX _ empty _ _ = empty
+
+instance (KnownSymbol ℓ, c ℓ τ, ForallX ('R ρ) c, FrontExtends ℓ τ ('R ρ), AllUniqueLabels (Extend ℓ τ ('R ρ))) => ForallX ('R (ℓ :-> τ ': ρ) :: Row k) c where
+  {-# INLINE metamorphX #-}
+  metamorphX h empty uncons cons = case frontExtendsDict @ℓ @τ @('R ρ) of
+    FrontExtendsDict Dict ->
+      cons (Label @ℓ) . first (metamorphX @_ @('R ρ) @c h empty uncons cons) . uncons (Label @ℓ)
+
+-- | A constraint used to implement @Forall@.  
+type ForallC :: forall k. Row k -> (k -> Constraint) -> Symbol -> k -> Constraint 
+class (HasType l t r, c t) => ForallC r c l t 
+instance (HasType l t r, c t) => ForallC r c l t 
+
+-- | Any structure over a row in which every element is similarly constrained can
+-- be metamorphized into another structure over the same row.
+class ForallX r (ForallC r c) => Forall (r :: Row k) (c :: k -> Constraint) where
+  metamorph :: forall (p :: * -> * -> *) (f :: Row k -> *) (g :: Row k -> *) (h :: k -> *). Bifunctor p
+            => Proxy (Proxy h, Proxy p)
+            -> (f Empty -> g Empty)
+            -> (forall ℓ τ ρ. (KnownSymbol ℓ, c τ, HasType ℓ τ r, HasType ℓ τ ρ) -- note the "HasType ℓ τ r", which gives us the relation we need (I think?)
+               => Label ℓ -> f ρ -> p (f (ρ .- ℓ)) (h τ))
             -> (forall ℓ τ ρ. (KnownSymbol ℓ, c τ, FrontExtends ℓ τ ρ, AllUniqueLabels (Extend ℓ τ ρ))
                => Label ℓ -> p (g ρ) (h τ) -> g (Extend ℓ τ ρ))
-               -- ^ The fold
-            -> f r  -- ^ The input structure
+            -> f r  
             -> g r
+  metamorph h empty uncons cons = metamorphX @_ @r @(ForallC r c) @p @f @g h empty (goUncons uncons) (goCons cons) 
+    where 
+      goUncons :: forall l t p' 
+                . (KnownSymbol l
+                  , ForallC r c l t
+                  , HasType l t p') 
+                => (forall (ℓ :: Symbol) (τ :: k) (ρ :: Row k)
+                    . (KnownSymbol ℓ
+                    , c τ
+                    , HasType ℓ τ r
+                    , HasType ℓ τ ρ)
+                        => Label ℓ -> f ρ -> p (f (ρ .- ℓ)) (h τ))
+                -> Label l -> f p' -> p (f (p' .- l)) (h t)
+      goUncons f l fp = f l fp 
 
-instance Forall (R '[]) c where
-  {-# INLINE metamorph #-}
-  metamorph _ empty _ _ = empty
+      goCons :: forall l t p' 
+              . ( KnownSymbol l 
+                , FrontExtends l t p'
+                , ForallC r c l t
+                , AllUniqueLabels (Extend l t p')) 
+              => (forall ℓ τ ρ
+                    . (KnownSymbol ℓ
+                    , c τ
+                    , FrontExtends ℓ τ ρ
+                    , AllUniqueLabels (Extend ℓ τ ρ))
+                    => Label ℓ 
+                    -> p (g ρ) (h τ) 
+                    -> g (Extend ℓ τ ρ))
+              -> Label l 
+              -> p (g p') (h t) 
+              -> g (Extend l t p')
+      goCons f l p = f l p 
 
-instance (KnownSymbol ℓ, c τ, Forall ('R ρ) c, FrontExtends ℓ τ ('R ρ), AllUniqueLabels (Extend ℓ τ ('R ρ))) => Forall ('R (ℓ :-> τ ': ρ) :: Row k) c where
-  {-# INLINE metamorph #-}
-  metamorph h empty uncons cons = case frontExtendsDict @ℓ @τ @('R ρ) of
-    FrontExtendsDict Dict ->
-      cons (Label @ℓ) . first (metamorph @_ @('R ρ) @c h empty uncons cons) . uncons (Label @ℓ)
-
-
+instance ForallX r (ForallC r c) => Forall (r :: Row k) (c :: k -> Constraint)
 -- | Any structure over two rows in which the elements of each row satisfy some
 --   constraints can be metamorphized into another structure over both of the
 --   rows.
@@ -516,9 +566,9 @@ type family DiffCont (cmp :: Ordering) (hl :: Symbol) (al :: k) (tl :: [LT k])
     DiffCont _ hl al tl hr ar tr = (Diff (hl ':-> al ': tl) tr)
 
 type family ShowRowType (r :: [LT k]) :: ErrorMessage where
-  ShowRowType '[] = TL.Text "Empty"
-  ShowRowType '[l ':-> t] = TL.ShowType l TL.:<>: TL.Text " .== " TL.:<>: TL.ShowType t
-  ShowRowType ((l ':-> t) ': r) = TL.ShowType l TL.:<>: TL.Text " .== " TL.:<>: TL.ShowType t TL.:<>: TL.Text " .+ " TL.:<>: ShowRowType r
+  ShowRowType '[] = TL.Text "Empty"
+  ShowRowType '[l ':-> t] = TL.ShowType l TL.:<>: TL.Text " .== " TL.:<>: TL.ShowType t
+  ShowRowType ((l ':-> t) ': r) = TL.ShowType l TL.:<>: TL.Text " .== " TL.:<>: TL.ShowType t TL.:<>: TL.Text " .+ " TL.:<>: ShowRowType r
 
 -- | There doesn't seem to be a (<=.?) :: Symbol -> Symbol -> Bool,
 -- so here it is in terms of other ghc-7.8 type functions
@@ -527,3 +577,26 @@ type a <=.? b = (CmpSymbol a b == 'LT)
 -- | A lower fixity operator for type equality
 infix 4 ≈
 type a ≈ b = a ~ b
+
+-- | Universal instantiation for Rows. If some row satisfies `Forall r c` then, 
+-- if we know that `t` is an element of that row, we also know that `t` satisfies `c`. 
+forall :: forall r c l t. (Forall r c, KnownSymbol l) => HasType l t r :- c t
+forall = unmapDict go
+  where
+    go :: Dict (HasType l t r) -> Dict (c t)
+    go Dict = getConst $ metamorph @_ @r @c @Either @Proxy @(Const (Dict (c t))) @(Const (Dict (c t)))
+      Proxy empty doUncons doCons Proxy
+      where
+        empty = error "Impossible"
+
+        doUncons :: forall ℓ τ ρ. (KnownSymbol ℓ, c τ, HasType ℓ τ ρ, HasType ℓ τ r)
+           => Label ℓ -> Proxy ρ -> Either (Proxy (ρ .- ℓ)) (Const (Dict (c t)) τ)
+        doUncons _ _ = case sameSymbol @l @ℓ Proxy Proxy of
+          Just Refl -> Right $ Const Dict 
+          Nothing -> Left Proxy
+
+        doCons :: forall ℓ τ ρ. (KnownSymbol ℓ, c τ, FrontExtends ℓ τ ρ, AllUniqueLabels (Extend ℓ τ ρ))
+           => Label ℓ -> Either (Const (Dict (c t)) ρ) (Const (Dict (c t)) τ) -> Const (Dict (c t)) (Extend ℓ τ ρ)
+        doCons _ (Left (Const Dict))  = Const Dict
+        doCons _ (Right (Const Dict)) = Const Dict
+

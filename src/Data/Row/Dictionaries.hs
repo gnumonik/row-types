@@ -10,6 +10,8 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE TypeOperators #-}
+{-# LANGUAGE StandaloneKindSignatures #-}
+{-# LANGUAGE UndecidableSuperClasses #-}
 -----------------------------------------------------------------------------
 -- |
 -- Module      :  Data.Row.Dictionaries
@@ -45,6 +47,7 @@ module Data.Row.Dictionaries
   , apSingleForall
   , subsetJoin, subsetJoin', subsetRestrict, subsetTrans
   , mapDifference, apSingleDifference
+  , forall, inst, unForall, unForallX
   -- ** Helper Types
   , IsA(..)
   , As(..)
@@ -64,6 +67,7 @@ import qualified Unsafe.Coerce as UNSAFE
 import GHC.TypeLits
 
 import Data.Row.Internal
+import Data.Kind
 
 
 
@@ -71,7 +75,7 @@ import Data.Row.Internal
 -- variable.  Particularly, it says that for the type 'a', there exists a 't'
 -- such that @a ~ f t@ and @c t@ holds.
 data As c f a where
-  As :: forall c f a t. (a ~ f t, c t) => As c f a
+  As :: forall k (c :: k -> Constraint) (f :: k -> Type) (a :: Type) (t :: k). (a ~ f t, c t) => As c f a
 
 -- | A class to capture the idea of 'As' so that it can be partially applied in
 -- a context.
@@ -94,38 +98,81 @@ class ActsOn c t a where
 instance c f => ActsOn c t (f t) where
   actsOn = As'
 
--- | An internal type used by the 'metamorph' in 'mapForall'.
-newtype MapForall c f (r :: Row k) = MapForall { unMapForall :: Dict (Forall (Map f r) (IsA c f)) }
+-- | One half of the isomorphism between the type classes @ForallX r (ForallC r c)@ and @Forall r c@
+unForallX :: forall k (r :: Row k) (c :: k -> Constraint). ForallX r (ForallC r c) :- Forall r c 
+unForallX = Sub Dict 
 
--- | An internal type used by the 'metamorph' in 'apSingleForall'.
-newtype ApSingleForall c a (fs :: Row (k -> k')) = ApSingleForall
-  { unApSingleForall :: Dict (Forall (ApSingle fs a) (ActsOn c a)) }
+-- | The other half of the isomorphism between the type classes @ForallX r (ForallC r c)@ and @Forall r c@
+unForall :: forall k (r :: Row k) (c :: k -> Constraint). Forall r c :- ForallX r (ForallC r c) 
+unForall = Sub Dict 
+
+-- | An internal type used by the 'metamorphX' in 'mapForallX'.
+type MapForallX :: forall k. (k -> Constraint) -> (k -> Type) -> Row k -> Row k -> Type 
+newtype MapForallX c f p r  = MapForallX {unMapForallX :: Dict (ForallX (Map f r) (ForallC (Map f p) (IsA c f))) }
+
+-- | An internal type used by the 'metamorphX' in 'apSingleForallX'.
+--   (the last type parameter is phantom)
+newtype ApSingleForallX c a (fs :: Row (k -> k')) (fs' :: Row (k -> k')) = ApSingleForallX
+  { unApSingleForallX :: Dict (ForallX  (ApSingle fs' a) (ForallC (ApSingle fs a) (ActsOn c a))) }
+
+-- | Internal function used to implement @mapForall@
+mapForallX :: forall k (f :: k -> Type) (ρ :: Row k) (c :: k -> Constraint)
+            . ForallX ρ (ForallC ρ c) 
+           :- ForallX (Map f ρ) (ForallC (Map f ρ) (IsA c f))
+mapForallX = Sub $ unMapForallX $ metamorphX @_ @ρ @(ForallC ρ c) @Const @Proxy @(MapForallX c f ρ) @Proxy Proxy empty uncons cons  Proxy
+  where empty _ = MapForallX Dict
+        uncons _ _ = Const Proxy
+        cons :: forall l t r. (KnownSymbol l, ForallC ρ c l t, FrontExtends l t r, AllUniqueLabels (Extend l t r))
+             => Label l 
+             -> Const (MapForallX c f ρ r) (Proxy t)
+             -> MapForallX c f ρ (Extend l t r)
+        cons _ (Const (MapForallX Dict)) = case frontExtendsDict @l @t @r of
+          FrontExtendsDict Dict -> MapForallX Dict 
+            \\ mapHas @f @l @t @ρ
+            \\ mapExtendSwap @f @l @t @r 
+            \\ uniqueMap @f @(Extend l t r)
 
 -- | This allows us to derive a @Forall (Map f r) ..@ from a @Forall r ..@.
+-- forall f p c. ForallX p (ForallC p c) :- ForallX (Map f p) (ForallC p (IsA c f))
 mapForall :: forall f ρ c. Forall ρ c :- Forall (Map f ρ) (IsA c f)
-mapForall = Sub $ unMapForall $ metamorph @_ @ρ @c @Const @Proxy @(MapForall c f) @Proxy Proxy empty uncons cons $ Proxy
-  where empty _ = MapForall Dict
+mapForall = unForallX @_ @(Map f ρ) @(IsA c f) 
+    `trans` mapForallX @_ @f @ρ @c 
+    `trans` unForall @_ @ρ @c   
+
+-- | Internal function used to implement @apSingleForall@
+apSingleForallX :: forall k1 k2 (a :: k1) (fs :: Row (k1 -> k2)) (c :: (k1 -> k2) -> Constraint)
+                 . ForallX fs (ForallC fs c) 
+                :- ForallX (ApSingle fs a) (ForallC (ApSingle fs a) (ActsOn c a))
+apSingleForallX = unmapDict (\d -> unApSingleForallX (go @c @a @fs) \\ d) -- using unmapDict vs Sub (...) saves us an unsafeCoerce in the empty case
+  where                                                                   
+    go :: forall (c :: (k1 -> k2) -> Constraint) (a :: k1) (fs :: Row (k1 -> k2))
+        . ForallX fs (ForallC fs c) 
+       => ApSingleForallX c a fs fs 
+    go = metamorphX @_ @fs @(ForallC fs c) @Const @Proxy @(ApSingleForallX c a fs) @Proxy Proxy empty uncons cons $ Proxy
+      where 
+        empty _ = ApSingleForallX Dict 
+        
         uncons _ _ = Const Proxy
-        cons :: forall ℓ τ ρ. (KnownSymbol ℓ, c τ, FrontExtends ℓ τ ρ, AllUniqueLabels (Extend ℓ τ ρ))
-             => Label ℓ -> Const (MapForall c f ρ) (Proxy τ)
-             -> MapForall c f (Extend ℓ τ ρ)
-        cons _ (Const (MapForall Dict)) = case frontExtendsDict @ℓ @τ @ρ of
-          FrontExtendsDict Dict -> MapForall Dict
-            \\ mapExtendSwap @f @ℓ @τ @ρ
-            \\ uniqueMap @f @(Extend ℓ τ ρ)
+
+        cons :: forall (ℓ :: Symbol) (τ :: k1 -> k2) (ρ :: Row (k1 -> k2)).
+          ( KnownSymbol ℓ
+          , ForallC fs c ℓ τ
+          , FrontExtends ℓ τ ρ
+          , AllUniqueLabels (Extend ℓ τ ρ)) 
+          => Label ℓ
+          -> Const (ApSingleForallX c a fs ρ) (Proxy τ)
+          -> ApSingleForallX c a fs (Extend ℓ τ ρ)
+        cons _ (Const (ApSingleForallX Dict)) = case frontExtendsDict @ℓ @τ @ρ of
+          FrontExtendsDict Dict -> ApSingleForallX Dict
+            \\ apSingleHas @a @ℓ @τ @fs
+            \\ apSingleExtendSwap @a @ℓ @τ @ρ
+            \\ uniqueApSingle @a @(Extend ℓ τ ρ) 
 
 -- | This allows us to derive a @Forall (ApSingle f r) ..@ from a @Forall f ..@.
 apSingleForall :: forall a fs c. Forall fs c :- Forall (ApSingle fs a) (ActsOn c a)
-apSingleForall = Sub $ unApSingleForall $ metamorph @_ @fs @c @Const @Proxy @(ApSingleForall c a) @Proxy Proxy empty uncons cons $ Proxy
-  where empty _ = ApSingleForall Dict
-        uncons _ _ = Const Proxy
-        cons :: forall ℓ τ ρ. (KnownSymbol ℓ, c τ, FrontExtends ℓ τ ρ, AllUniqueLabels (Extend ℓ τ ρ))
-             => Label ℓ -> Const (ApSingleForall c a ρ) (Proxy τ)
-             -> ApSingleForall c a (Extend ℓ τ ρ)
-        cons _ (Const (ApSingleForall Dict)) = case frontExtendsDict @ℓ @τ @ρ of
-          FrontExtendsDict Dict -> ApSingleForall Dict
-            \\ apSingleExtendSwap @a @ℓ @τ @ρ
-            \\ uniqueApSingle @a @(Extend ℓ τ ρ)
+apSingleForall = unForallX @_ @(ApSingle fs a) @(ActsOn c a) 
+         `trans` apSingleForallX @_ @_ @a @fs @c 
+         `trans` unForall @_ @fs @c 
 
 -- | Allow any 'Forall' over a row-type, be usable for 'Unconstrained1'.
 freeForall :: forall r c. Forall r c :- Forall r Unconstrained1
@@ -222,3 +269,8 @@ apSingleDifference :: forall r r' x. Dict (ApSingle r x .\\ ApSingle r' x ≈ Ap
 apSingleDifference = UNSAFE.unsafeCoerce $ Dict @Unconstrained
 
 -- differenceForall :: forall r r' c. Forall r c :- Forall (r .\\ r') c
+
+-- | If every element of a row satisfies some constraint, and a type is an element of that row 
+--   (at some known label), then we know the type satisfies the constraint 
+inst :: forall l c r t. (Forall r c, HasType l t r, KnownSymbol l) => Dict (c t)
+inst = mapDict (forall @r @c @l @t) Dict   
