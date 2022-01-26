@@ -44,6 +44,9 @@ module Data.Row.Internal
   , ForallC
   , forall
   , BiForall(..)
+  , BiForallX(..)
+  , BiForallC
+  , biForall
   , BiConstraint
   , Unconstrained
   , Unconstrained1
@@ -322,33 +325,66 @@ class ForallX r (ForallC r c) => Forall (r :: Row k) (c :: k -> Constraint) wher
       goCons f l p = f l p 
 
 instance ForallX r (ForallC r c) => Forall (r :: Row k) (c :: k -> Constraint)
+
+class (HasType l t1 r1, HasType l t2 r2, c t1 t2) => BiForallC r1 r2 c l t1 t2 
+instance  (HasType l t1 r1, HasType l t2 r2, c t1 t2) => BiForallC r1 r2 c l t1 t2 
+
+class BiForallX (r1 :: Row k1) (r2 :: Row k2) (c :: Symbol -> k1 -> k2 -> Constraint) where
+  -- | A metamorphism is an anamorphism (an unfold) followed by a catamorphism (a fold).
+  biMetamorphX :: forall (p :: * -> * -> *) (f :: Row k1 -> Row k2 -> *) (g :: Row k1 -> Row k2 -> *)
+                        (h :: k1 -> k2 -> *). Bifunctor p
+              => Proxy (Proxy h, Proxy p)
+              -> (f Empty Empty -> g Empty Empty)
+              -> (forall ℓ τ1 τ2 ρ1 ρ2. (KnownSymbol ℓ, c ℓ τ1 τ2, HasType ℓ τ1 ρ1, HasType ℓ τ2 ρ2)
+                  => Label ℓ -> f ρ1 ρ2 -> p (f (ρ1 .- ℓ) (ρ2 .- ℓ)) (h τ1 τ2))
+              -> (forall ℓ τ1 τ2 ρ1 ρ2. ( KnownSymbol ℓ
+                                        , c ℓ τ1 τ2
+                                        , FrontExtends ℓ τ1 ρ1
+                                        , FrontExtends ℓ τ2 ρ2
+                                        , AllUniqueLabels (Extend ℓ τ1 ρ1)
+                                        , AllUniqueLabels (Extend ℓ τ2 ρ2))
+                  => Label ℓ 
+                  -> p (g ρ1 ρ2) (h τ1 τ2) 
+                  -> g (Extend ℓ τ1 ρ1) (Extend ℓ τ2 ρ2))
+                  -> f r1 r2 
+                  -> g r1 r2
+
+instance BiForallX (R '[]) (R '[]) c1 where
+  {-# INLINE biMetamorphX #-}
+  biMetamorphX _ empty _ _ = empty
+
+instance ( KnownSymbol ℓ
+         , c ℓ τ1 τ2 
+         , BiForallX ('R ρ1) ('R ρ2) c
+         , FrontExtends ℓ τ1 ('R ρ1)
+         , FrontExtends ℓ τ2 ('R ρ2)
+         , AllUniqueLabels (Extend ℓ τ1 ('R ρ1))
+         , AllUniqueLabels (Extend ℓ τ2 ('R ρ2)))
+      => BiForallX ('R (ℓ :-> τ1 ': ρ1)) ('R (ℓ :-> τ2 ': ρ2)) c where
+  {-# INLINE biMetamorphX #-}
+  biMetamorphX h empty uncons cons = case (frontExtendsDict @ℓ @τ1 @('R ρ1), frontExtendsDict @ℓ @τ2 @('R ρ2)) of
+    (FrontExtendsDict Dict, FrontExtendsDict Dict) ->
+      cons (Label @ℓ) . first (biMetamorphX @_ @_ @('R ρ1) @('R ρ2) @c h empty uncons cons) . uncons (Label @ℓ)
+
+
 -- | Any structure over two rows in which the elements of each row satisfy some
 --   constraints can be metamorphized into another structure over both of the
 --   rows.
-class BiForall (r1 :: Row k1) (r2 :: Row k2) (c :: k1 -> k2 -> Constraint) where
+class BiForallX r1 r2 (BiForallC r1 r2 c) => BiForall (r1 :: Row k1) (r2 :: Row k2) (c :: k1 -> k2 -> Constraint) where
   -- | A metamorphism is an anamorphism (an unfold) followed by a catamorphism (a fold).
   biMetamorph :: forall (p :: * -> * -> *) (f :: Row k1 -> Row k2 -> *) (g :: Row k1 -> Row k2 -> *)
                         (h :: k1 -> k2 -> *). Bifunctor p
               => Proxy (Proxy h, Proxy p)
               -> (f Empty Empty -> g Empty Empty)
-              -> (forall ℓ τ1 τ2 ρ1 ρ2. (KnownSymbol ℓ, c τ1 τ2, HasType ℓ τ1 ρ1, HasType ℓ τ2 ρ2)
+              -> (forall ℓ τ1 τ2 ρ1 ρ2. (KnownSymbol ℓ, c τ1 τ2, HasType ℓ τ1 ρ1, HasType ℓ τ2 ρ2, HasType ℓ τ1 r1, HasType ℓ τ2 r2)
                   => Label ℓ -> f ρ1 ρ2 -> p (f (ρ1 .- ℓ) (ρ2 .- ℓ)) (h τ1 τ2))
               -> (forall ℓ τ1 τ2 ρ1 ρ2. (KnownSymbol ℓ, c τ1 τ2, FrontExtends ℓ τ1 ρ1, FrontExtends ℓ τ2 ρ2, AllUniqueLabels (Extend ℓ τ1 ρ1), AllUniqueLabels (Extend ℓ τ2 ρ2))
                   => Label ℓ -> p (g ρ1 ρ2) (h τ1 τ2) -> g (Extend ℓ τ1 ρ1) (Extend ℓ τ2 ρ2))
               -> f r1 r2 -> g r1 r2
+  biMetamorph h empty uncons cons = biMetamorphX @_ @_ @r1 @r2 @(BiForallC r1 r2 c) @p @f @g @h h empty uncons cons
 
 
-instance BiForall (R '[]) (R '[]) c1 where
-  {-# INLINE biMetamorph #-}
-  biMetamorph _ empty _ _ = empty
-
-instance (KnownSymbol ℓ, c τ1 τ2, BiForall ('R ρ1) ('R ρ2) c, FrontExtends ℓ τ1 ('R ρ1), FrontExtends ℓ τ2 ('R ρ2), AllUniqueLabels (Extend ℓ τ1 ('R ρ1)), AllUniqueLabels (Extend ℓ τ2 ('R ρ2)))
-      => BiForall ('R (ℓ :-> τ1 ': ρ1)) ('R (ℓ :-> τ2 ': ρ2)) c where
-  {-# INLINE biMetamorph #-}
-  biMetamorph h empty uncons cons = case (frontExtendsDict @ℓ @τ1 @('R ρ1), frontExtendsDict @ℓ @τ2 @('R ρ2)) of
-    (FrontExtendsDict Dict, FrontExtendsDict Dict) ->
-      cons (Label @ℓ) . first (biMetamorph @_ @_ @('R ρ1) @('R ρ2) @c h empty uncons cons) . uncons (Label @ℓ)
-
+instance BiForallX r1 r2 (BiForallC r1 r2 c) => BiForall (r1 :: Row k1) (r2 :: Row k2) (c :: k1 -> k2 -> Constraint) 
 
 -- | A null constraint
 class Unconstrained
@@ -598,3 +634,47 @@ forall = unmapDict go
         doCons _ (Left (Const Dict))  = Const Dict
         doCons _ (Right (Const Dict)) = Const Dict
 
+
+data BiProxy :: forall k1 k2. k1 -> k2 -> * where 
+  BiProxy :: BiProxy a b 
+
+data BiConst :: forall k1 k2. * -> k1 -> k2 -> * where 
+  BiConst :: forall k1 k2 (a :: *) (j :: k1) (k :: k2). {getBiConst :: a} -> BiConst a j k  
+
+biForall :: forall r1 r2 c l t1 t2  
+          . (BiForall r1 r2 c, KnownSymbol l) 
+         => (HasType l t1 r1, HasType l t2 r2) :- c t1 t2 
+biForall = unmapDict go 
+  where 
+    go :: Dict (HasType l t1 r1, HasType l t2 r2) -> Dict (c t1 t2)
+    go Dict = getBiConst $ biMetamorph @_ @_ @r1 @r2 @c @Either @BiProxy @(BiConst (Dict (c t1 t2))) @(BiConst (Dict (c t1 t2)))
+                Proxy empty doUncons doCons BiProxy 
+      where 
+        empty = error "Impossible"
+
+        doUncons :: forall ℓ τ1 τ2 ρ1 ρ2
+                  . (KnownSymbol ℓ
+                  , c τ1 τ2
+                  , HasType ℓ τ1 ρ1
+                  , HasType ℓ τ2 ρ2
+                  , HasType ℓ τ1 r1
+                  , HasType ℓ τ2 r2) 
+                  => Label ℓ
+                  -> BiProxy ρ1 ρ2
+                  -> Either (BiProxy (ρ1 .- ℓ) (ρ2 .- ℓ)) (BiConst (Dict (c t1 t2)) τ1 τ2)
+        doUncons _ BiProxy = case sameSymbol @l @ℓ Proxy Proxy of 
+          Just Refl -> Right $ BiConst Dict
+          Nothing   -> Left BiProxy 
+
+        doCons :: forall ℓ τ1 τ2 ρ1 ρ2
+                . (KnownSymbol ℓ
+                , c τ1 τ2
+                , FrontExtends ℓ τ1 ρ1
+                , FrontExtends ℓ τ2 ρ2
+                , AllUniqueLabels (Extend ℓ τ1 ρ1)
+                , AllUniqueLabels (Extend ℓ τ2 ρ2)) 
+               => Label ℓ
+               -> Either (BiConst (Dict (c t1 t2)) ρ1 ρ2) (BiConst (Dict (c t1 t2)) τ1 τ2)
+               -> BiConst (Dict (c t1 t2)) (Extend ℓ τ1 ρ1) (Extend ℓ τ2 ρ2)
+        doCons _ (Left (BiConst Dict)) = BiConst Dict 
+        doCons _ (Right (BiConst Dict)) = BiConst Dict 

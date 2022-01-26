@@ -46,6 +46,7 @@ module Data.Row.Dictionaries
   , subsetJoin, subsetJoin', subsetRestrict, subsetTrans
   , mapDifference, apSingleDifference
   , forall, inst, unForall, unForallX
+  , biForall, inst2
   -- ** Helper Types
   , IsA(..)
   , As(..)
@@ -271,3 +272,11 @@ apSingleDifference = UNSAFE.unsafeCoerce $ Dict @Unconstrained
 --   (at some known label), then we know the type satisfies the constraint 
 inst :: forall l c r t. (Forall r c, HasType l t r, KnownSymbol l) => Dict (c t)
 inst = mapDict (forall @r @c @l @t) Dict   
+
+inst2 :: forall l c r1 r2 t1 t2
+       . (BiForall r1 r2 c
+       , HasType l t1 r1
+       , HasType l t2 r2
+       , KnownSymbol l
+       ) => Dict (c t1 t2)
+inst2 = mapDict (biForall @r1 @r2 @c @l @t1 @t2) Dict 
