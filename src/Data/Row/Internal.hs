@@ -310,6 +310,7 @@ class BiForallX (r1 :: Row k1) (r2 :: Row k2) (c :: Symbol -> k1 -> k2 -> Constr
                                         , c ℓ τ1 τ2
                                         , FrontExtends ℓ τ1 ρ1
                                         , FrontExtends ℓ τ2 ρ2
+                                        , BiForallX ρ1 ρ2 c 
                                         , AllUniqueLabels (Extend ℓ τ1 ρ1)
                                         , AllUniqueLabels (Extend ℓ τ2 ρ2))
                   => Label ℓ 
@@ -347,7 +348,7 @@ class BiForallX r1 r2 (BiForallC r1 r2 c) => BiForall (r1 :: Row k1) (r2 :: Row 
               -> (f Empty Empty -> g Empty Empty)
               -> (forall ℓ τ1 τ2 ρ1 ρ2. (KnownSymbol ℓ, c τ1 τ2, HasType ℓ τ1 ρ1, HasType ℓ τ2 ρ2, HasType ℓ τ1 r1, HasType ℓ τ2 r2)
                   => Label ℓ -> f ρ1 ρ2 -> p (f (ρ1 .- ℓ) (ρ2 .- ℓ)) (h τ1 τ2))
-              -> (forall ℓ τ1 τ2 ρ1 ρ2. (KnownSymbol ℓ, c τ1 τ2, FrontExtends ℓ τ1 ρ1, FrontExtends ℓ τ2 ρ2, AllUniqueLabels (Extend ℓ τ1 ρ1), AllUniqueLabels (Extend ℓ τ2 ρ2))
+              -> (forall ℓ τ1 τ2 ρ1 ρ2. (KnownSymbol ℓ, BiForallX ρ1 ρ2 (BiForallC r1 r2 c),c τ1 τ2, FrontExtends ℓ τ1 ρ1, FrontExtends ℓ τ2 ρ2, AllUniqueLabels (Extend ℓ τ1 ρ1), AllUniqueLabels (Extend ℓ τ2 ρ2))
                   => Label ℓ -> p (g ρ1 ρ2) (h τ1 τ2) -> g (Extend ℓ τ1 ρ1) (Extend ℓ τ2 ρ2))
               -> f r1 r2 -> g r1 r2
   biMetamorph h empty uncons cons = biMetamorphX @_ @_ @r1 @r2 @(BiForallC r1 r2 c) @p @f @g @h h empty uncons cons
