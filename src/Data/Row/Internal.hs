@@ -259,7 +259,7 @@ class ForallX (r :: Row k) (c :: Symbol -> k -> Constraint) -- (c' :: Symbol -> 
             -> (forall ℓ τ ρ. (KnownSymbol ℓ, c ℓ τ, HasType ℓ τ ρ)
                => Label ℓ -> f ρ -> p (f (ρ .- ℓ)) (h τ))
                -- ^ The unfold
-            -> (forall ℓ τ ρ. (KnownSymbol ℓ, c ℓ τ, FrontExtends ℓ τ ρ, AllUniqueLabels (Extend ℓ τ ρ))
+            -> (forall ℓ τ ρ. (KnownSymbol ℓ, c ℓ τ, ForallX ρ c, FrontExtends ℓ τ ρ, AllUniqueLabels (Extend ℓ τ ρ))
                => Label ℓ -> p (g ρ) (h τ) -> g (Extend ℓ τ ρ))
                -- ^ The fold   
             -> f r  -- ^ The input structure
@@ -287,42 +287,11 @@ class ForallX r (ForallC r c) => Forall (r :: Row k) (c :: k -> Constraint) wher
             -> (f Empty -> g Empty)
             -> (forall ℓ τ ρ. (KnownSymbol ℓ, c τ, HasType ℓ τ r, HasType ℓ τ ρ) -- note the "HasType ℓ τ r", which gives us the relation we need (I think?)
                => Label ℓ -> f ρ -> p (f (ρ .- ℓ)) (h τ))
-            -> (forall ℓ τ ρ. (KnownSymbol ℓ, c τ, FrontExtends ℓ τ ρ, AllUniqueLabels (Extend ℓ τ ρ))
+            -> (forall ℓ τ ρ. (KnownSymbol ℓ, c τ, ForallX ρ (ForallC r c), FrontExtends ℓ τ ρ, AllUniqueLabels (Extend ℓ τ ρ))
                => Label ℓ -> p (g ρ) (h τ) -> g (Extend ℓ τ ρ))
             -> f r  
             -> g r
-  metamorph h empty uncons cons = metamorphX @_ @r @(ForallC r c) @p @f @g h empty (goUncons uncons) (goCons cons) 
-    where 
-      goUncons :: forall l t p' 
-                . (KnownSymbol l
-                  , ForallC r c l t
-                  , HasType l t p') 
-                => (forall (ℓ :: Symbol) (τ :: k) (ρ :: Row k)
-                    . (KnownSymbol ℓ
-                    , c τ
-                    , HasType ℓ τ r
-                    , HasType ℓ τ ρ)
-                        => Label ℓ -> f ρ -> p (f (ρ .- ℓ)) (h τ))
-                -> Label l -> f p' -> p (f (p' .- l)) (h t)
-      goUncons f l fp = f l fp 
-
-      goCons :: forall l t p' 
-              . ( KnownSymbol l 
-                , FrontExtends l t p'
-                , ForallC r c l t
-                , AllUniqueLabels (Extend l t p')) 
-              => (forall ℓ τ ρ
-                    . (KnownSymbol ℓ
-                    , c τ
-                    , FrontExtends ℓ τ ρ
-                    , AllUniqueLabels (Extend ℓ τ ρ))
-                    => Label ℓ 
-                    -> p (g ρ) (h τ) 
-                    -> g (Extend ℓ τ ρ))
-              -> Label l 
-              -> p (g p') (h t) 
-              -> g (Extend l t p')
-      goCons f l p = f l p 
+  metamorph h empty uncons cons = metamorphX @_ @r @(ForallC r c) @p @f @g h empty uncons cons
 
 instance ForallX r (ForallC r c) => Forall (r :: Row k) (c :: k -> Constraint)
 
@@ -678,3 +647,4 @@ biForall = unmapDict go
                -> BiConst (Dict (c t1 t2)) (Extend ℓ τ1 ρ1) (Extend ℓ τ2 ρ2)
         doCons _ (Left (BiConst Dict)) = BiConst Dict 
         doCons _ (Right (BiConst Dict)) = BiConst Dict 
+
