@@ -310,16 +310,31 @@ infixl 2 .$
 -- Then all of the following would be possible:
 --
 -- >>> xtheny greeting
--- "hello world!"
+-- WAS "hello world!"
+-- NOW Variable not in scope: xtheny :: t0 -> t
+-- NOW Variable not in scope: greeting
 --
 -- >>> xtheny .$ (#x, greeting) .$ (#y, greeting) $ empty
--- "hello world!"
+-- WAS "hello world!"
+-- NOW Variable not in scope: greeting :: Rec r'0
+-- NOW Variable not in scope:
+-- NOW   xtheny
+-- NOW     :: Rec ('R '[ "x" ':-> (r'0 .! "x"), "y" ':-> (r'1 .! "y")]) -> x
+-- NOW Variable not in scope: greeting :: Rec r'1
 --
 -- >>> xtheny .$ (#y, greeting) .$ (#x, greeting) $ empty
--- "hello world!"
+-- WAS "hello world!"
+-- NOW Variable not in scope: greeting :: Rec r'0
+-- NOW Variable not in scope:
+-- NOW   xtheny
+-- NOW     :: Rec ('R '[ "x" ':-> (r'1 .! "x"), "y" ':-> (r'0 .! "y")]) -> x
+-- NOW Variable not in scope: greeting :: Rec r'1
 --
 -- >>> xtheny .$ (#y, greeting) .$ (#x, #x .== "Goodbye ") $ empty
--- "Goodbye world!"
+-- WAS "Goodbye world!"
+-- NOW Variable not in scope: greeting :: Rec r'0
+-- NOW Variable not in scope:
+-- NOW   xtheny :: Rec ('R '[ "x" ':-> [Char], "y" ':-> (r'0 .! "y")]) -> x
 (.$) :: (KnownSymbol l, r' .! l ≈ t) => (Rec (l .== t .+ r) -> x) -> (Label l, Rec r') -> Rec r -> x
 (.$) f (l, r') r = curryRec l f (r' .! l) r
 

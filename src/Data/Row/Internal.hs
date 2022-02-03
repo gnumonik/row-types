@@ -256,7 +256,7 @@ class ForallX (r :: Row k) (c :: Symbol -> k -> Constraint) -- (c' :: Symbol -> 
             => Proxy (Proxy h, Proxy p)
             -> (f Empty -> g Empty)
                -- ^ The way to transform the empty element
-            -> (forall ℓ τ ρ. (KnownSymbol ℓ, c ℓ τ, HasType ℓ τ ρ)
+            -> (forall ℓ τ ρ. (KnownSymbol ℓ, c ℓ τ, ForallX ρ c, HasType ℓ τ ρ)
                => Label ℓ -> f ρ -> p (f (ρ .- ℓ)) (h τ))
                -- ^ The unfold
             -> (forall ℓ τ ρ. (KnownSymbol ℓ, c ℓ τ, ForallX ρ c, FrontExtends ℓ τ ρ, AllUniqueLabels (Extend ℓ τ ρ))
@@ -276,8 +276,8 @@ instance (KnownSymbol ℓ, c ℓ τ, ForallX ('R ρ) c, FrontExtends ℓ τ ('R 
       cons (Label @ℓ) . first (metamorphX @_ @('R ρ) @c h empty uncons cons) . uncons (Label @ℓ)
 
 -- | A constraint used to implement @Forall@.  
-class (HasType l t r, c t) => ForallC r c l t 
-instance (HasType l t r, c t) => ForallC r c l t 
+class (HasType l t r, c t, KnownSymbol l) => ForallC r c l t 
+instance (HasType l t r, c t, KnownSymbol l) => ForallC r c l t 
 
 -- | Any structure over a row in which every element is similarly constrained can
 -- be metamorphized into another structure over the same row.
@@ -285,7 +285,7 @@ class ForallX r (ForallC r c) => Forall (r :: Row k) (c :: k -> Constraint) wher
   metamorph :: forall (p :: * -> * -> *) (f :: Row k -> *) (g :: Row k -> *) (h :: k -> *). Bifunctor p
             => Proxy (Proxy h, Proxy p)
             -> (f Empty -> g Empty)
-            -> (forall ℓ τ ρ. (KnownSymbol ℓ, c τ, HasType ℓ τ r, HasType ℓ τ ρ) -- note the "HasType ℓ τ r", which gives us the relation we need (I think?)
+            -> (forall ℓ τ ρ. (KnownSymbol ℓ, ForallX ρ (ForallC r c), c τ, HasType ℓ τ r, HasType ℓ τ ρ) -- note the "HasType ℓ τ r", which gives us the relation we need (I think?)
                => Label ℓ -> f ρ -> p (f (ρ .- ℓ)) (h τ))
             -> (forall ℓ τ ρ. (KnownSymbol ℓ, c τ, ForallX ρ (ForallC r c), FrontExtends ℓ τ ρ, AllUniqueLabels (Extend ℓ τ ρ))
                => Label ℓ -> p (g ρ) (h τ) -> g (Extend ℓ τ ρ))
@@ -304,13 +304,13 @@ class BiForallX (r1 :: Row k1) (r2 :: Row k2) (c :: Symbol -> k1 -> k2 -> Constr
                         (h :: k1 -> k2 -> *). Bifunctor p
               => Proxy (Proxy h, Proxy p)
               -> (f Empty Empty -> g Empty Empty)
-              -> (forall ℓ τ1 τ2 ρ1 ρ2. (KnownSymbol ℓ, c ℓ τ1 τ2, HasType ℓ τ1 ρ1, HasType ℓ τ2 ρ2)
+              -> (forall ℓ τ1 τ2 ρ1 ρ2. (KnownSymbol ℓ, BiForallX ρ1 ρ2 c, c ℓ τ1 τ2, HasType ℓ τ1 ρ1, HasType ℓ τ2 ρ2)
                   => Label ℓ -> f ρ1 ρ2 -> p (f (ρ1 .- ℓ) (ρ2 .- ℓ)) (h τ1 τ2))
               -> (forall ℓ τ1 τ2 ρ1 ρ2. ( KnownSymbol ℓ
                                         , c ℓ τ1 τ2
                                         , FrontExtends ℓ τ1 ρ1
                                         , FrontExtends ℓ τ2 ρ2
-                                        , BiForallX ρ1 ρ2 c 
+                                        , BiForallX ρ1 ρ2 c
                                         , AllUniqueLabels (Extend ℓ τ1 ρ1)
                                         , AllUniqueLabels (Extend ℓ τ2 ρ2))
                   => Label ℓ 
@@ -346,13 +346,12 @@ class BiForallX r1 r2 (BiForallC r1 r2 c) => BiForall (r1 :: Row k1) (r2 :: Row 
                         (h :: k1 -> k2 -> *). Bifunctor p
               => Proxy (Proxy h, Proxy p)
               -> (f Empty Empty -> g Empty Empty)
-              -> (forall ℓ τ1 τ2 ρ1 ρ2. (KnownSymbol ℓ, c τ1 τ2, HasType ℓ τ1 ρ1, HasType ℓ τ2 ρ2, HasType ℓ τ1 r1, HasType ℓ τ2 r2)
+              -> (forall ℓ τ1 τ2 ρ1 ρ2. (KnownSymbol ℓ, c τ1 τ2, BiForallX ρ1 ρ2 (BiForallC r1 r2 c), HasType ℓ τ1 ρ1, HasType ℓ τ2 ρ2, HasType ℓ τ1 r1, HasType ℓ τ2 r2)
                   => Label ℓ -> f ρ1 ρ2 -> p (f (ρ1 .- ℓ) (ρ2 .- ℓ)) (h τ1 τ2))
               -> (forall ℓ τ1 τ2 ρ1 ρ2. (KnownSymbol ℓ, BiForallX ρ1 ρ2 (BiForallC r1 r2 c),c τ1 τ2, FrontExtends ℓ τ1 ρ1, FrontExtends ℓ τ2 ρ2, AllUniqueLabels (Extend ℓ τ1 ρ1), AllUniqueLabels (Extend ℓ τ2 ρ2))
                   => Label ℓ -> p (g ρ1 ρ2) (h τ1 τ2) -> g (Extend ℓ τ1 ρ1) (Extend ℓ τ2 ρ2))
               -> f r1 r2 -> g r1 r2
   biMetamorph h empty uncons cons = biMetamorphX @_ @_ @r1 @r2 @(BiForallC r1 r2 c) @p @f @g @h h empty uncons cons
-
 
 instance BiForallX r1 r2 (BiForallC r1 r2 c) => BiForall (r1 :: Row k1) (r2 :: Row k2) (c :: k1 -> k2 -> Constraint) 
 
@@ -581,6 +580,8 @@ type a <=.? b = (CmpSymbol a b == 'LT)
 -- | A lower fixity operator for type equality
 infix 4 ≈
 type a ≈ b = a ~ b
+
+
 
 -- | Universal instantiation for Rows. If some row satisfies `Forall r c` then, 
 -- if we know that `t` is an element of that row, we also know that `t` satisfies `c`. 
