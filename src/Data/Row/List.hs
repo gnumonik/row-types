@@ -167,7 +167,7 @@ type MetamorphX (r :: Row k) (c :: Symbol -> k -> Constraint)  = forall (p :: * 
             -> GoEmpty f g
             -> GoUncons c f p h
             -> GoCons c p h g
-            -> f r  -- ^ The input structure
+            -> f r
             -> g r
 
 type Proxies h p = Proxy (Proxy h, Proxy p)
@@ -223,3 +223,15 @@ withMetamorphX m k
      @(ForallX r c)
      m
      k
+
+data QuantifiedRow :: forall k. (Symbol -> k -> Constraint) -> Row k -> Type where
+  QuantifiedRow :: forall k
+                         (c :: Symbol -> k -> Constraint)
+                         (r :: Row k)
+                 . ForallX r c => QuantifiedRow c r
+
+quantifyRowList :: forall k (c :: Symbol -> k -> Constraint) (f :: k -> Type) (r :: Row k)
+                 . RowListX c f r -> QuantifiedRow c r
+quantifyRowList = \case
+  Nil -> QuantifiedRow
+  Cons Label t (FrontExtendsDict Dict) rest -> QuantifiedRow

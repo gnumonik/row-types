@@ -35,7 +35,8 @@ Library
     unordered-containers >= 0.2,
     generic-lens >= 1.0.0.0,
     profunctors >= 5.0,
-    text
+    text,
+    ghc-prim
   Exposed-modules:
       Data.Row
     , Data.Row.Internal
@@ -43,6 +44,7 @@ Library
     , Data.Row.Records
     , Data.Row.Variants
     , Data.Row.Switch
+    , Data.Row.List
   hs-source-dirs:
     src
   ghc-options: -W
