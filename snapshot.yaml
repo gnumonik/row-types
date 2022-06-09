@@ -1,0 +1,2 @@
+resolver: nightly-2022-06-08
+compiler: ghc-9.4.1-alpha

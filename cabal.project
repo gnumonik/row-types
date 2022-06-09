@@ -1,0 +1,22 @@
+packages: .
+        , ../../bifunctors
+        , ../../th-abstraction
+        , ../../tagged
+        , ../../profunctors
+        , ../../indexed-traversable/indexed-traversable
+        , ../../hashable
+        , ../../constraints
+        , ../../type-equality
+        , ../../boring/boring
+        , ../../generic-lens/generic-lens
+        , ../../generic-lens/generic-lens-core
+
+source-repository-package
+  type: git
+  location: https://github.com/ekmett/comonad.git
+  branch: main
+
+source-repository-package
+  type: git
+  location: https://github.com/ekmett/contravariant.git
+  branch: main
