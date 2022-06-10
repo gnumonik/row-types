@@ -31,6 +31,7 @@ import Data.Row.Internal
 import Data.Row.Records
 import Data.Row.Variants
 
+import Data.Singletons
 -- | A simple class that we use to provide a constraint for function application.
 class AppliesTo r f x | r x -> f, f r -> x where
   applyTo :: f -> x -> r
@@ -52,9 +53,11 @@ switch v r = getConst2 $ biMetamorph @_ @_ @r @v @(AppliesTo x) @Either @SwitchD
   Proxy doNil doUncons doCons $ SwitchData r v
   where
     doNil (SwitchData _ v) = impossible v
-    doUncons :: forall ℓ f τ ϕ ρ. (KnownSymbol ℓ, AppliesTo x f τ, HasType ℓ f ϕ, HasType ℓ τ ρ)
-             => Label ℓ -> SwitchData ϕ ρ -> Either (SwitchData (ϕ .- ℓ) (ρ .- ℓ)) (Const2 x f τ)
-    doUncons l (SwitchData r v) = bimap (SwitchData $ lazyRemove l r) (Const2 . applyTo (r .! l)) $ trial v l
+    doUncons :: forall ℓ f τ ϕ ρ. (KnownSymbol ℓ, AppliesTo x f τ, HasType ϕ ℓ f, HasType ρ ℓ τ)
+             => Sing ℓ -> SwitchData ϕ ρ -> Either (SwitchData (ϕ .- ℓ) (ρ .- ℓ)) (Const2 x f τ)
+    doUncons l (SwitchData r v) =
+      let l' = singLabel l
+      in  bimap (SwitchData $ lazyRemove l r) (Const2 . applyTo (r .! l')) $ trial v l'
     -- doCons :: forall ℓ f τ ϕ ρ. (KnownSymbol ℓ, AppliesTo x f τ)
     --        => Label ℓ -> Either (Const2 x f τ) (Const2 x ϕ ρ) -> Const2 x (Extend ℓ f ϕ) (Extend ℓ τ ρ)
     doCons _ (Left  (Const2 x)) = Const2 x

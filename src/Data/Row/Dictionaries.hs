@@ -54,7 +54,7 @@ module Data.Row.Dictionaries
   , As'(..)
   -- * Re-exports
   , Dict(..), (:-)(..), HasDict(..), (\\), withDict
-  , Unconstrained, Unconstrained1, Unconstrained2
+  , Top, Top1, Top2
 
   )
 where
@@ -68,6 +68,7 @@ import GHC.TypeLits
 import Data.Row.Internal
 import Data.Kind
 
+import Data.Singletons
 
 
 -- | This data type is used to for its ability to existentially bind a type
@@ -121,7 +122,7 @@ mapForallX = Sub $ unMapForallX $ metamorphX @_ @ρ @(ForallC ρ c) @Const @Prox
   where empty _ = MapForallX Dict
         uncons _ _ = Const Proxy
         cons :: forall l t r. (KnownSymbol l, ForallC ρ c l t, FrontExtends l t r, AllUniqueLabels (Extend l t r))
-             => Label l 
+             => Sing l
              -> Const (MapForallX c f ρ r) (Proxy t)
              -> MapForallX c f ρ (Extend l t r)
         cons _ (Const (MapForallX Dict)) = case frontExtendsDict @l @t @r of
@@ -157,7 +158,7 @@ apSingleForallX = unmapDict (\d -> unApSingleForallX (go @c @a @fs) \\ d) -- usi
           , ForallC fs c ℓ τ
           , FrontExtends ℓ τ ρ
           , AllUniqueLabels (Extend ℓ τ ρ)) 
-          => Label ℓ
+          => Sing ℓ
           -> Const (ApSingleForallX c a fs ρ) (Proxy τ)
           -> ApSingleForallX c a fs (Extend ℓ τ ρ)
         cons _ (Const (ApSingleForallX Dict)) = case frontExtendsDict @ℓ @τ @ρ of
@@ -172,111 +173,111 @@ apSingleForall = unForallX @_ @(ApSingle fs a) @(ActsOn c a)
          `trans` apSingleForallX @_ @_ @a @fs @c 
          `trans` unForall @_ @fs @c 
 
--- | Allow any 'Forall' over a row-type, be usable for 'Unconstrained1'.
-freeForall :: forall r c. Forall r c :- Forall r Unconstrained1
+-- | Allow any 'Forall' over a row-type, be usable for 'Top1'.
+freeForall :: forall r c. Forall r c :- Forall r Top1
 freeForall = Sub $ UNSAFE.unsafeCoerce @(Dict (Forall r c)) Dict
 
 -- | `FreeForall` can be used when a `Forall` constraint is necessary but there
 -- is no particular constraint we care about.
-type FreeForall r = Forall r Unconstrained1
+type FreeForall r = Forall r Top1
 
 -- | `FreeForall` can be used when a `BiForall` constraint is necessary but
 -- there is no particular constraint we care about.
-type FreeBiForall r1 r2 = BiForall r1 r2 Unconstrained2
+type FreeBiForall r1 r2 = BiForall r1 r2 Top2
 
 -- | If we know that 'r' has been extended with @l .== t@, then we know that this
 -- extension at the label 'l' must be 't'.
 extendHas :: forall l t r. Dict (Extend l t r .! l ≈ t)
-extendHas = UNSAFE.unsafeCoerce $ Dict @Unconstrained
+extendHas = UNSAFE.unsafeCoerce $ Dict @Top
 
 -- | This allows us to derive @Map f r .! l ≈ f t@ from @r .! l ≈ t@
 mapHas :: forall f l t r. (r .! l ≈ t) :- (Map f r .! l ≈ f t, Map f r .- l ≈ Map f (r .- l))
-mapHas = Sub $ UNSAFE.unsafeCoerce $ Dict @(Unconstrained, Unconstrained)
+mapHas = Sub $ UNSAFE.unsafeCoerce $ Dict @(Top, Top)
 
 -- | This allows us to derive @Ap ϕ ρ .! l ≈ f t@ from @ϕ .! l ≈ f@ and @ρ .! l ≈ t@
 apHas :: forall l f ϕ t ρ. (ϕ .! l ≈ f, ρ .! l ≈ t) :- (Ap ϕ ρ .! l ≈ f t, Ap ϕ ρ .- l ≈ Ap (ϕ .- l) (ρ .- l))
-apHas = Sub $ UNSAFE.unsafeCoerce $ Dict @(Unconstrained, Unconstrained)
+apHas = Sub $ UNSAFE.unsafeCoerce $ Dict @(Top, Top)
 
 -- | This allows us to derive @ApSingle r x .! l ≈ f x@ from @r .! l ≈ f@
 apSingleHas :: forall x l f r. (r .! l ≈ f) :- (ApSingle r x .! l ≈ f x, ApSingle r x .- l ≈ ApSingle (r .- l) x)
-apSingleHas = Sub $ UNSAFE.unsafeCoerce $ Dict @(Unconstrained, Unconstrained)
+apSingleHas = Sub $ UNSAFE.unsafeCoerce $ Dict @(Top, Top)
 
 -- | Proof that the 'Map' type family preserves labels and their ordering.
 mapExtendSwap :: forall f ℓ τ r. Dict (Extend ℓ (f τ) (Map f r) ≈ Map f (Extend ℓ τ r))
-mapExtendSwap = UNSAFE.unsafeCoerce $ Dict @Unconstrained
+mapExtendSwap = UNSAFE.unsafeCoerce $ Dict @Top
 
 -- | Proof that the 'Ap' type family preserves labels and their ordering.
 apExtendSwap :: forall ℓ f fs τ r. Dict (Extend ℓ (f τ) (Ap fs r) ≈ Ap (Extend ℓ f fs) (Extend ℓ τ r))
-apExtendSwap = UNSAFE.unsafeCoerce $ Dict @Unconstrained
+apExtendSwap = UNSAFE.unsafeCoerce $ Dict @Top
 
 -- | Proof that the 'ApSingle' type family preserves labels and their ordering.
 apSingleExtendSwap :: forall τ ℓ f r. Dict (Extend ℓ (f τ) (ApSingle r τ) ≈ ApSingle (Extend ℓ f r) τ)
-apSingleExtendSwap = UNSAFE.unsafeCoerce $ Dict @Unconstrained
+apSingleExtendSwap = UNSAFE.unsafeCoerce $ Dict @Top
 
 -- | Proof that the 'Ap' type family preserves labels and their ordering.
 zipExtendSwap :: forall ℓ τ1 r1 τ2 r2. Dict (Extend ℓ (τ1, τ2) (Zip r1 r2) ≈ Zip (Extend ℓ τ1 r1) (Extend ℓ τ2 r2))
-zipExtendSwap = UNSAFE.unsafeCoerce $ Dict @Unconstrained
+zipExtendSwap = UNSAFE.unsafeCoerce $ Dict @Top
 
 -- | Map preserves uniqueness of labels.
 uniqueMap :: forall f r. Dict (AllUniqueLabels (Map f r) ≈ AllUniqueLabels r)
-uniqueMap = UNSAFE.unsafeCoerce $ Dict @Unconstrained
+uniqueMap = UNSAFE.unsafeCoerce $ Dict @Top
 
 -- | Ap preserves uniqueness of labels.
 uniqueAp :: forall fs r. Dict (AllUniqueLabels (Ap fs r) ≈ AllUniqueLabels r)
-uniqueAp = UNSAFE.unsafeCoerce $ Dict @Unconstrained
+uniqueAp = UNSAFE.unsafeCoerce $ Dict @Top
 
 -- | ApSingle preserves uniqueness of labels.
 uniqueApSingle :: forall x r. Dict (AllUniqueLabels (ApSingle r x) ≈ AllUniqueLabels r)
-uniqueApSingle = UNSAFE.unsafeCoerce $ Dict @Unconstrained
+uniqueApSingle = UNSAFE.unsafeCoerce $ Dict @Top
 
 -- | Zip preserves uniqueness of labels.
 uniqueZip :: forall r1 r2. Dict (AllUniqueLabels (Zip r1 r2) ≈ (AllUniqueLabels r1, AllUniqueLabels r2))
-uniqueZip = UNSAFE.unsafeCoerce $ Dict @(Unconstrained, Unconstrained)
+uniqueZip = UNSAFE.unsafeCoerce $ Dict @(Top, Top)
 
 -- | Map distributes over MinJoin
 mapMinJoin :: forall f r r'. Dict (Map f r .\/ Map f r' ≈ Map f (r .\/ r'))
-mapMinJoin = UNSAFE.unsafeCoerce $ Dict @Unconstrained
+mapMinJoin = UNSAFE.unsafeCoerce $ Dict @Top
 
 -- | ApSingle distributes over MinJoin
 apSingleMinJoin :: forall r r' x. Dict (ApSingle r x .\/ ApSingle r' x ≈ ApSingle (r .\/ r') x)
-apSingleMinJoin = UNSAFE.unsafeCoerce $ Dict @Unconstrained
+apSingleMinJoin = UNSAFE.unsafeCoerce $ Dict @Top
 
 -- | Two rows are subsets of a third if and only if their disjoint union is a
 -- subset of that third.
 subsetJoin :: forall r1 r2 s. Dict ((Subset r1 s, Subset r2 s) ≈ (Subset (r1 .+ r2) s))
-subsetJoin = UNSAFE.unsafeCoerce $ Dict @Unconstrained
+subsetJoin = UNSAFE.unsafeCoerce $ Dict @Top
 
 -- | If two rows are each subsets of a third, their join is a subset of the third
 subsetJoin' :: forall r1 r2 s. Dict ((Subset r1 s, Subset r2 s) ≈ (Subset (r1 .// r2) s))
-subsetJoin' = UNSAFE.unsafeCoerce $ Dict @Unconstrained
+subsetJoin' = UNSAFE.unsafeCoerce $ Dict @Top
 
 -- | If a row is a subset of another, then its restriction is also a subset of the other
 subsetRestrict :: forall r s l. (Subset r s) :- (Subset (r .- l) s)
-subsetRestrict = Sub $ UNSAFE.unsafeCoerce $ Dict @Unconstrained
+subsetRestrict = Sub $ UNSAFE.unsafeCoerce $ Dict @Top
 
 -- | Subset is transitive
 subsetTrans :: forall r1 r2 r3. (Subset r1 r2, Subset r2 r3) :- (Subset r1 r3)
-subsetTrans = Sub $ UNSAFE.unsafeCoerce $ Dict @Unconstrained
+subsetTrans = Sub $ UNSAFE.unsafeCoerce $ Dict @Top
 
 -- | Map distributes over Difference
 mapDifference :: forall f r r'. Dict (Map f r .\\ Map f r' ≈ Map f (r .\\ r'))
-mapDifference = UNSAFE.unsafeCoerce $ Dict @Unconstrained
+mapDifference = UNSAFE.unsafeCoerce $ Dict @Top
 
 -- | ApSingle distributes over Difference
 apSingleDifference :: forall r r' x. Dict (ApSingle r x .\\ ApSingle r' x ≈ ApSingle (r .\\ r') x)
-apSingleDifference = UNSAFE.unsafeCoerce $ Dict @Unconstrained
+apSingleDifference = UNSAFE.unsafeCoerce $ Dict @Top
 
 -- differenceForall :: forall r r' c. Forall r c :- Forall (r .\\ r') c
 
 -- | If every element of a row satisfies some constraint, and a type is an element of that row 
 --   (at some known label), then we know the type satisfies the constraint 
-inst :: forall l c r t. (Forall r c, HasType l t r, KnownSymbol l) => Dict (c t)
+inst :: forall l c r t. (Forall r c, HasType r l t, KnownSymbol l) => Dict (c t)
 inst = mapDict (forall @r @c @l @t) Dict   
 
 inst2 :: forall l c r1 r2 t1 t2
        . (BiForall r1 r2 c
-       , HasType l t1 r1
-       , HasType l t2 r2
+       , HasType r1 l t1
+       , HasType r2 l t2
        , KnownSymbol l
        ) => Dict (c t1 t2)
-inst2 = mapDict (biForall @r1 @r2 @c @l @t1 @t2) Dict 
+inst2 = mapDict (biForall @r1 @r2 @c @l @t1 @t2) Dict

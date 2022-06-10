@@ -33,6 +33,8 @@ import Data.Type.Equality
 
 import Unsafe.Coerce
 
+import Data.Singletons
+
 uniqueLabelsUpdate :: forall k (l :: Symbol) (a :: k) (b :: k) (rest :: [LT k])
                     .   AllUniqueLabels (R (l ':-> a ': rest))
                     :-  AllUniqueLabels (R (l ':-> b ': rest))
@@ -112,8 +114,8 @@ toRowListX = metamorphX @k
                      {ρ :: Row k}
             . (KnownSymbol ℓ
             , c ℓ τ
-            , HasType ℓ τ ρ)
-          => Label ℓ
+            , HasType ρ ℓ τ)
+          => Sing ℓ
           -> Proxy ρ
           -> (Proxy (ρ .- ℓ), Proxy τ)
     goUncons _ _ = (Proxy,Proxy)
@@ -126,7 +128,7 @@ toRowListX = metamorphX @k
             , ForallX ρ c
             , FrontExtends ℓ τ ρ
             , AllUniqueLabels (Extend ℓ τ ρ)
-            ) => Label ℓ
+            ) => Sing ℓ
               -> (RowListX c Proxy ρ, Proxy τ)
               -> RowListX c Proxy (Extend ℓ τ ρ)
     goCons l (cfx,Proxy) = case frontExtendsDict @ℓ @τ @ρ of
@@ -143,7 +145,7 @@ metamorphList :: forall k
           => Proxy (Proxy h, Proxy p)
           -> (RowListX c f Empty -> g Empty)
               -- ^ The way to transform the empty element
-          -> (forall ℓ τ ρ. (KnownSymbol ℓ, c ℓ τ, ForallX ρ c, HasType ℓ τ ρ)
+          -> (forall ℓ τ ρ. (KnownSymbol ℓ, c ℓ τ, ForallX ρ c, HasType ρ ℓ τ)
               => Label ℓ -> RowListX c f ρ -> p (RowListX c f (ρ .- ℓ)) (h τ))
               -- ^ The unfold
           -> (forall ℓ τ ρ. (KnownSymbol ℓ, c ℓ τ, ForallX ρ c, FrontExtends ℓ τ ρ, AllUniqueLabels (Extend ℓ τ ρ))
@@ -157,41 +159,6 @@ metamorphList proxy goEmpty goUncons goCons = \case
     e@(Cons l t d rest) -> case d of
       FrontExtendsDict Dict -> goCons l . first (metamorphList proxy goEmpty goUncons goCons) . goUncons l $ e
 
-type MetamorphX :: forall k. Row k -> (Symbol -> k -> Constraint) -> Type
-type MetamorphX (r :: Row k) (c :: Symbol -> k -> Constraint)  = forall (p :: * -> * -> *)
-                       (f :: Row k -> *)
-                       (g :: Row k -> *)
-                       (h :: k -> *)
-             . Bifunctor p
-            => Proxies h p
-            -> GoEmpty f g
-            -> GoUncons c f p h
-            -> GoCons c p h g
-            -> f r
-            -> g r
-
-type Proxies h p = Proxy (Proxy h, Proxy p)
-
-type GoEmpty f g = (f Empty -> g Empty)
-
-type GoUncons c f p h = (forall ℓ τ ρ
-                . ( KnownSymbol ℓ
-                , c ℓ τ
-                , ForallX ρ c
-                , HasType ℓ τ ρ
-                ) => Label ℓ
-                  -> f ρ
-                  -> p (f (ρ .- ℓ)) (h τ))
-
-type GoCons c p h g = (forall ℓ τ ρ
-                  . (KnownSymbol ℓ
-                  , c ℓ τ
-                  , ForallX ρ c
-                  , FrontExtends ℓ τ ρ
-                  , AllUniqueLabels (Extend ℓ τ ρ)
-                  ) => Label ℓ
-                    -> p (g ρ) (h τ)
-                    -> g (Extend ℓ τ ρ))
 
 withMetamorphX :: forall k
                          {r :: Row k}
@@ -235,3 +202,10 @@ quantifyRowList :: forall k (c :: Symbol -> k -> Constraint) (f :: k -> Type) (r
 quantifyRowList = \case
   Nil -> QuantifiedRow
   Cons Label t (FrontExtendsDict Dict) rest -> QuantifiedRow
+
+
+------ totally unrelated to anything, just an idea i don't want to forget
+
+-- with the new withDict magic we can FINALLY infer C a from p @@ a
+class C (a :: k) (p :: k ~> Type) where
+  p :: (p @@ a)

@@ -182,7 +182,7 @@ While we have added names or further fields, we can also choose to forget
 information in a record.  To remove a particular label, one can use the .-
 operator, like so:
 
-> unName :: HasType "name" a r => Rec r -> Rec (r .- "name")
+> unName :: HasType r "name" a => Rec r -> Rec (r .- "name")
 > unName r = r .- #name
 
 For larger changes, it is easier to use the restrict function.  The following

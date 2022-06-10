@@ -10,6 +10,19 @@ packages: .
         , ../../boring/boring
         , ../../generic-lens/generic-lens
         , ../../generic-lens/generic-lens-core
+        , ../../singletons/singletons-base
+        , ../../singletons/singletons-th
+        , ../../singletons/singletons
+        , ../../primitive
+        , ../../vector/vector
+        , ../../vector/vector-stream
+        , ../../th-desugar
+        , ../../th-orphans
+        , ../../th-lift
+        , ../../th-abstraction
+        , ../../th-expand-syns
+        , ../../th-compat
+
 
 source-repository-package
   type: git

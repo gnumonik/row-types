@@ -9,7 +9,7 @@
 {-# LANGUAGE UndecidableInstances #-}
 module OverridingTypeClassInstances where
 
--- Note that `Data.Row.Aeson` is not exported my the row-types library and
+-- Note that `Data.Row.Aeson` is not exported by the row-types library and
 -- currently lives in the src\aeson directory.  You must put it in an
 -- appropriate place and make sure to have `aeson` in your environment in order
 -- to use this module.

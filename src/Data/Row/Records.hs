@@ -119,7 +119,7 @@ import Unsafe.Coerce
 import Data.Row.Dictionaries
 import Data.Row.Internal
 
-
+import Data.Singletons
 {--------------------------------------------------------------------
   Open records
 --------------------------------------------------------------------}
@@ -191,24 +191,27 @@ unSingleton r = (l, r .! l) where l = Label @l
 -- | Record extension. The row may already contain the label,
 --   in which case the origin value can be obtained after restriction ('.-') with
 --   the label.
-extend :: forall a l r. KnownSymbol l => Label l -> a -> Rec r -> Rec (Extend l a r)
-extend (toKey -> l) a (OR m) = OR $ M.insert l (HideType a) m
+extend :: forall a l r f. KnownSymbol l => f l -> a -> Rec r -> Rec (Extend l a r)
+extend _  a (OR m) = OR $ M.insert (toKey $ Label @l) (HideType a) m
 
 -- | Update the value associated with the label.
-update :: (KnownSymbol l, r .! l ≈ a) => Label l -> a -> Rec r -> Rec r
-update (toKey -> l) a (OR m) = OR $ M.adjust f l m where f = const (HideType a)
+update' :: forall l r a f. (KnownSymbol l, r .! l ≈ a) => f l -> a -> Rec r -> Rec r
+update' _  a (OR m) = OR $ M.adjust f (toKey $ Label @l) m where f = const (HideType a)
+
+update :: forall l r a. (KnownSymbol l, r .! l ≈ a) => Label l -> a -> Rec r -> Rec r
+update l a r = update' l a r
 
 -- | Focus on the value associated with the label.
-focus ::
+focus :: forall l r' r a b f g.
   ( KnownSymbol l
   , r' .! l ≈ b
   , r  .! l ≈ a
   , r' ~ Modify l b r
   , r  ~ Modify l a r'
   , Functor f)
-  => Label l -> (a -> f b) -> Rec r -> f (Rec r')
-focus (toKey -> l) f (OR m) = case m M.! l of
-  HideType x -> OR . flip (M.insert l) m . HideType <$> f (unsafeCoerce x)
+  => g l -> (a -> f b) -> Rec r -> f (Rec r')
+focus _ f (OR m) = case m M.! (toKey $ Label @l) of
+  HideType x -> OR . flip (M.insert (toKey $ Label @l)) m . HideType <$> f (unsafeCoerce x)
 
 -- | Focus on a sub-record
 multifocus :: forall u v r f.
@@ -285,12 +288,12 @@ restrict = fst . split
 -- Thus, it's great when one knows ahead of time that no future merges will happen
 -- and that the whole record will be GC'd soon, for instance, during the catamorphism
 -- function of 'metamorph'.
-lazyRemove :: KnownSymbol l => Label l -> Rec r -> Rec (r .- l)
+lazyRemove :: forall l r f. KnownSymbol l => f l -> Rec r -> Rec (r .- l)
 lazyRemove _ (OR m) = OR m
 
 -- | This is the same as @(lazyRemove l r, r .! l)@.
-lazyUncons :: KnownSymbol l => Label l -> Rec r -> (Rec (r .- l), r .! l)
-lazyUncons l r = (lazyRemove l r, r .! l)
+lazyUncons :: forall l r f. KnownSymbol l => f l -> Rec r -> (Rec (r .- l), r .! l)
+lazyUncons l r = (lazyRemove l r, r .! (Label @l))
 
 -- | Kind of like 'curry' for functions over records.
 curryRec :: forall l t r x. KnownSymbol l => Label l -> (Rec (l .== t .+ r) -> x) -> t -> Rec r -> x
@@ -354,8 +357,8 @@ eraseWithLabels f = getConst . metamorph @_ @ρ @c @(,) @Rec @(Const [(s,b)]) @I
   where doNil _ = Const []
         doUncons l = second Identity . lazyUncons l
         doCons :: forall ℓ τ ρ. (KnownSymbol ℓ, c τ)
-               => Label ℓ -> (Const [(s,b)] ρ, Identity τ) -> Const [(s,b)] (Extend ℓ τ ρ)
-        doCons l (Const c, Identity x) = Const $ (show' l, f x) : c
+               => Sing ℓ -> (Const [(s,b)] ρ, Identity τ) -> Const [(s,b)] (Extend ℓ τ ρ)
+        doCons l (Const c, Identity x) = Const $ (show' . singLabel $ l, f x) : c
 
 -- | A fold over two row type structures at once
 eraseZip :: forall c ρ b. Forall ρ c => (forall a. c a => a -> a -> b) -> Rec ρ -> Rec ρ -> [b]
@@ -364,7 +367,7 @@ eraseZip f x y = getConst $ metamorph @_ @ρ @c @(,) @(Product Rec Rec) @(Const 
           where (r1', a) = lazyUncons l r1
                 (r2', b) = lazyUncons l r2
         doCons :: forall ℓ τ ρ. c τ
-               => Label ℓ -> (Const [b] ρ, Pair' τ) -> Const [b] (Extend ℓ τ ρ)
+               => Sing ℓ -> (Const [b] ρ, Pair' τ) -> Const [b] (Extend ℓ τ ρ)
         doCons _ (Const c, unPair' -> x) = Const $ uncurry f x : c
 
 -- | Turns a record into a 'HashMap' from values representing the labels to
@@ -382,11 +385,11 @@ map :: forall c f r. Forall r c => (forall a. c a => a -> f a) -> Rec r -> Rec (
 map f = unRMap . metamorph @_ @r @c @(,) @Rec @(RMap f) @f Proxy doNil doUncons doCons
   where
     doNil _ = RMap empty
-    doUncons :: forall ℓ τ ρ. (KnownSymbol ℓ, c τ, HasType ℓ τ ρ)
-             => Label ℓ -> Rec ρ -> (Rec (ρ .- ℓ), f τ)
+    doUncons :: forall ℓ τ ρ. (KnownSymbol ℓ, c τ, HasType ρ ℓ τ )
+             => Sing ℓ -> Rec ρ -> (Rec (ρ .- ℓ), f τ)
     doUncons l = second f . lazyUncons l
     doCons :: forall ℓ τ ρ. (KnownSymbol ℓ, c τ)
-           => Label ℓ -> (RMap f ρ, f τ) -> RMap f (Extend ℓ τ ρ)
+           => Sing ℓ -> (RMap f ρ, f τ) -> RMap f (Extend ℓ τ ρ)
     doCons l (RMap r, v) = RMap (extend l v r)
       \\ mapExtendSwap @f @ℓ @τ @ρ
 
@@ -402,40 +405,40 @@ mapF :: forall k c g (ϕ :: Row (k -> *)) (ρ :: Row k). BiForall ϕ ρ c
 mapF f = unRFMap . biMetamorph @_ @_ @ϕ @ρ @c @(,) @RecAp @(RFMap g) @App Proxy doNil doUncons doCons . RecAp
   where
     doNil _ = RFMap empty
-    doUncons :: forall ℓ f τ ϕ ρ. (KnownSymbol ℓ, c f τ, HasType ℓ f ϕ, HasType ℓ τ ρ)
-             => Label ℓ -> RecAp ϕ ρ -> (RecAp (ϕ .- ℓ) (ρ .- ℓ), App f τ)
+    doUncons :: forall ℓ f τ ϕ ρ. (KnownSymbol ℓ, c f τ, HasType ϕ ℓ f , HasType ρ ℓ τ )
+             => Sing ℓ -> RecAp ϕ ρ -> (RecAp (ϕ .- ℓ) (ρ .- ℓ), App f τ)
     doUncons l (RecAp r) = bimap RecAp App $ lazyUncons l r
       \\ apHas @ℓ @f @ϕ @τ @ρ
     doCons :: forall ℓ f τ ϕ ρ. (KnownSymbol ℓ, c f τ)
-           => Label ℓ -> (RFMap g ϕ ρ, App f τ) -> RFMap g (Extend ℓ f ϕ) (Extend ℓ τ ρ)
+           => Sing ℓ -> (RFMap g ϕ ρ, App f τ) -> RFMap g (Extend ℓ f ϕ) (Extend ℓ τ ρ)
     doCons l (RFMap r, App v) = RFMap (extend l (f @f @τ v) r)
       \\ mapExtendSwap @g @ℓ @τ @ρ
       \\ apExtendSwap @ℓ @f @ϕ @(g τ) @(Map g ρ)
 
 -- | A function to map over a record given no constraint.
 map' :: forall f r. FreeForall r => (forall a. a -> f a) -> Rec r -> Rec (Map f r)
-map' f = map @Unconstrained1 f
+map' f = map @Top1 f
 
 -- | Lifts a natural transformation over a record.  In other words, it acts as a
 -- record transformer to convert a record of @f a@ values to a record of @g a@
 -- values.  If no constraint is needed, instantiate the first type argument with
--- 'Unconstrained1' or use 'transform''.
+-- 'Top1' or use 'transform''.
 transform :: forall c r f g. Forall r c => (forall a. c a => f a -> g a) -> Rec (Map f r) -> Rec (Map g r)
 transform f = unRMap . metamorph @_ @r @c @(,) @(RMap f) @(RMap g) @f Proxy doNil doUncons doCons . RMap
   where
     doNil _ = RMap empty
-    doUncons :: forall ℓ τ ρ. (KnownSymbol ℓ, c τ, HasType ℓ τ ρ)
-             => Label ℓ -> RMap f ρ -> (RMap f (ρ .- ℓ), f τ)
+    doUncons :: forall ℓ τ ρ. (KnownSymbol ℓ, c τ, HasType ρ ℓ τ )
+             => Sing ℓ -> RMap f ρ -> (RMap f (ρ .- ℓ), f τ)
     doUncons l (RMap r) = first RMap $ lazyUncons l r
       \\ mapHas @f @ℓ @τ @ρ
     doCons :: forall ℓ τ ρ. (KnownSymbol ℓ, c τ)
-           => Label ℓ -> (RMap g ρ, f τ) -> RMap g (Extend ℓ τ ρ)
+           => Sing ℓ -> (RMap g ρ, f τ) -> RMap g (Extend ℓ τ ρ)
     doCons l (RMap r, v) = RMap (extend l (f v) r)
       \\ mapExtendSwap @g @ℓ @τ @ρ
 
 -- | A version of 'transform' for when there is no constraint.
 transform' :: forall r f g. FreeForall r => (forall a. f a -> g a) -> Rec (Map f r) -> Rec (Map g r)
-transform' f = transform @Unconstrained1 @r f
+transform' f = transform @Top1 @r f
 
 
 data RecMapPair f g ρ = RecMapPair (Rec (Map f ρ)) (Rec (Map g ρ))
@@ -447,20 +450,20 @@ zipTransform :: forall c r f g h .
 zipTransform f x y = unRMap $ metamorph @_ @r @c @(,) @(RecMapPair f g) @(RMap h) @h Proxy doNil doUncons doCons $ RecMapPair x y
   where
     doNil _ = RMap empty
-    doUncons :: forall ℓ τ ρ. (KnownSymbol ℓ, c τ, HasType ℓ τ ρ)
-             => Label ℓ -> RecMapPair f g ρ -> (RecMapPair f g (ρ .- ℓ), h τ)
-    doUncons l (RecMapPair x y) = (RecMapPair (lazyRemove l x) (lazyRemove l y), f (x .! l) (y .! l))
+    doUncons :: forall ℓ τ ρ. (KnownSymbol ℓ, c τ, HasType ρ ℓ τ )
+             => Sing ℓ -> RecMapPair f g ρ -> (RecMapPair f g (ρ .- ℓ), h τ)
+    doUncons l (RecMapPair x y) = (RecMapPair (lazyRemove l x) (lazyRemove l y), f (x .! (singLabel l)) (y .! (singLabel l)))
       \\ mapHas @f @ℓ @τ @ρ
       \\ mapHas @g @ℓ @τ @ρ
     doCons :: forall ℓ τ ρ. (KnownSymbol ℓ, c τ)
-           => Label ℓ -> (RMap h ρ, h τ) -> RMap h (Extend ℓ τ ρ)
+           => Sing ℓ -> (RMap h ρ, h τ) -> RMap h (Extend ℓ τ ρ)
     doCons l (RMap r, h) = RMap (extend l h r)
       \\ mapExtendSwap @h @ℓ @τ @ρ
 
 -- | A version of 'zipTransform' for when there is no constraint.
 zipTransform' :: forall r f g h .
   FreeForall r => (forall a. f a -> g a -> h a) -> Rec (Map f r) -> Rec (Map g r) -> Rec (Map h r)
-zipTransform' f = zipTransform @Unconstrained1 @r f
+zipTransform' f = zipTransform @Top1 @r f
 
 -- | Traverse a function over a record.  Note that the fields of the record will
 -- be accessed in lexicographic order by the labels.
@@ -483,8 +486,8 @@ sequence' :: forall f r c. (Forall r c, Applicative f)
 sequence' = getCompose . metamorph @_ @r @c @(,) @(RMap f) @(Compose f Rec) @f Proxy doNil doUncons doCons . RMap
   where
     doNil _ = Compose (pure empty)
-    doUncons :: forall ℓ τ ρ. (KnownSymbol ℓ, c τ, HasType ℓ τ ρ)
-             => Label ℓ -> RMap f ρ -> (RMap f (ρ .- ℓ), f τ)
+    doUncons :: forall ℓ τ ρ. (KnownSymbol ℓ, c τ, HasType ρ ℓ τ )
+             => Sing ℓ -> RMap f ρ -> (RMap f (ρ .- ℓ), f τ)
     doUncons l (RMap r) = first RMap $ lazyUncons l r
       \\ mapHas @f @ℓ @τ @ρ
     doCons l (Compose fr, fv) = Compose $ extend l <$> fv <*> fr
@@ -492,19 +495,19 @@ sequence' = getCompose . metamorph @_ @r @c @(,) @(RMap f) @(Compose f Rec) @f P
 -- | Applicative sequencing over a record.
 sequence :: forall f r. (Applicative f, FreeForall r)
          => Rec (Map f r) -> f (Rec r)
-sequence = sequence' @_ @_ @Unconstrained1
+sequence = sequence' @_ @_ @Top1
 
 -- | This function acts as the inversion of `sequence`, allowing one to move a
 -- functor level into a record.
 distribute :: forall f r. (FreeForall r, Functor f) => f (Rec r) -> Rec (Map f r)
-distribute  = unRMap . metamorph @_ @r @Unconstrained1 @(,) @(Compose f Rec) @(RMap f) @f Proxy doNil doUncons doCons . Compose
+distribute  = unRMap . metamorph @_ @r @Top1 @(,) @(Compose f Rec) @(RMap f) @f Proxy doNil doUncons doCons . Compose
   where
     doNil _ = RMap empty
-    doUncons :: forall ℓ τ ρ. (KnownSymbol ℓ, HasType ℓ τ ρ)
-             => Label ℓ -> Compose f Rec ρ -> (Compose f Rec (ρ .- ℓ), f τ)
-    doUncons l (Compose fr) = (Compose $ lazyRemove l <$> fr, (.! l) <$> fr)
+    doUncons :: forall ℓ τ ρ. (KnownSymbol ℓ, HasType ρ ℓ τ )
+             => Sing ℓ -> Compose f Rec ρ -> (Compose f Rec (ρ .- ℓ), f τ)
+    doUncons l (Compose fr) = (Compose $ lazyRemove l <$> fr, (.! (singLabel l)) <$> fr)
     doCons :: forall ℓ τ ρ. (KnownSymbol ℓ)
-           => Label ℓ -> (RMap f ρ, f τ) -> RMap f (Extend ℓ τ ρ)
+           => Sing ℓ -> (RMap f ρ, f τ) -> RMap f (Extend ℓ τ ρ)
     doCons l (RMap r, fv) = RMap (extend l fv r)
       \\ mapExtendSwap @f @ℓ @τ @ρ
 
@@ -524,13 +527,13 @@ compose' :: forall c f g r . Forall r c
 compose' = unRMap . metamorph @_ @r @c @(,) @(RMap2 f g) @(RMap (Compose f g)) @(Compose f g) Proxy doNil doUncons doCons . RMap2
   where
     doNil _ = RMap empty
-    doUncons :: forall ℓ τ ρ. (KnownSymbol ℓ, c τ, HasType ℓ τ ρ)
-             => Label ℓ -> RMap2 f g ρ -> (RMap2 f g (ρ .- ℓ), Compose f g τ)
+    doUncons :: forall ℓ τ ρ. (KnownSymbol ℓ, c τ, HasType ρ ℓ τ )
+             => Sing ℓ -> RMap2 f g ρ -> (RMap2 f g (ρ .- ℓ), Compose f g τ)
     doUncons l (RMap2 r) = bimap RMap2 Compose $ lazyUncons l r
       \\ mapHas @f @ℓ @(g τ) @(Map g ρ)
       \\ mapHas @g @ℓ @τ @ρ
     doCons :: forall ℓ τ ρ. (KnownSymbol ℓ, c τ)
-           => Label ℓ -> (RMap (Compose f g) ρ, Compose f g τ) -> RMap (Compose f g) (Extend ℓ τ ρ)
+           => Sing ℓ -> (RMap (Compose f g) ρ, Compose f g τ) -> RMap (Compose f g) (Extend ℓ τ ρ)
     doCons l (RMap r, v) = RMap $ extend l v r
       \\ mapExtendSwap @(Compose f g) @ℓ @τ @ρ
 
@@ -538,7 +541,7 @@ compose' = unRMap . metamorph @_ @r @c @(,) @(RMap2 f g) @(RMap (Compose f g)) @
 -- one where the composition of the two functors is mapped over the types.
 compose :: forall f g r . FreeForall r
         => Rec (Map f (Map g r)) -> Rec (Map (Compose f g) r)
-compose = compose' @Unconstrained1 @f @g @r
+compose = compose' @Top1 @f @g @r
 
 -- | A version of 'uncompose' in which the constraint for 'Forall' can be chosen.
 uncompose' :: forall c f g r . Forall r c
@@ -546,13 +549,13 @@ uncompose' :: forall c f g r . Forall r c
 uncompose' = unRMap2 . metamorph @_ @r @c @(,) @(RMap (Compose f g)) @(RMap2 f g) @(Compose f g) Proxy doNil doUncons doCons . RMap
   where
     doNil _ = RMap2 empty
-    doUncons :: forall ℓ τ ρ. (KnownSymbol ℓ, c τ, HasType ℓ τ ρ)
-             => Label ℓ -> RMap (Compose f g) ρ -> (RMap (Compose f g) (ρ .- ℓ), Compose f g τ)
-    doUncons l (RMap r) = first RMap $ lazyUncons l r
+    doUncons :: forall ℓ τ ρ. (KnownSymbol ℓ, c τ, HasType ρ ℓ τ )
+             => Sing ℓ -> RMap (Compose f g) ρ -> (RMap (Compose f g) (ρ .- ℓ), Compose f g τ)
+    doUncons l (RMap r) = first RMap $ lazyUncons (singLabel l) r
       \\ mapHas @(Compose f g) @ℓ @τ @ρ
     doCons :: forall ℓ τ ρ. (KnownSymbol ℓ, c τ)
-           => Label ℓ -> (RMap2 f g ρ, Compose f g τ) -> RMap2 f g (Extend ℓ τ ρ)
-    doCons l (RMap2 r, Compose v) = RMap2 $ extend l v r
+           => Sing ℓ -> (RMap2 f g ρ, Compose f g τ) -> RMap2 f g (Extend ℓ τ ρ)
+    doCons l (RMap2 r, Compose v) = RMap2 $ extend (singLabel l) v r
       \\ mapExtendSwap @f @ℓ @(g τ) @(Map g ρ)
       \\ mapExtendSwap @g @ℓ @τ @ρ
 
@@ -561,7 +564,7 @@ uncompose' = unRMap2 . metamorph @_ @r @c @(,) @(RMap (Compose f g)) @(RMap2 f g
 -- time over the types.
 uncompose :: forall f g r . FreeForall r
           => Rec (Map (Compose f g) r) -> Rec (Map f (Map g r))
-uncompose = uncompose' @Unconstrained1 @f @g @r
+uncompose = uncompose' @Top1 @f @g @r
 
 
 -- | Coerce a record to a coercible representation.  The 'BiForall' in the context
@@ -591,12 +594,12 @@ newtype RZipPair (ρ1 :: Row *) (ρ2 :: Row *) = RZipPair { unRZipPair :: Rec (Z
 
 -- | Zips together two records that have the same set of labels.
 zip :: forall r1 r2. FreeBiForall r1 r2 => Rec r1 -> Rec r2 -> Rec (Zip r1 r2)
-zip r1 r2 = unRZipPair $ biMetamorph @_ @_ @r1 @r2 @Unconstrained2 @(,) @RecPair @RZipPair @(,) Proxy doNil doUncons doCons $ RecPair (r1, r2)
+zip r1 r2 = unRZipPair $ biMetamorph @_ @_ @r1 @r2 @Top2 @(,) @RecPair @RZipPair @(,) Proxy doNil doUncons doCons $ RecPair (r1, r2)
   where
     doNil _ = RZipPair empty
-    doUncons l (RecPair (r1, r2)) = (RecPair (lazyRemove l r1, lazyRemove l r2), (r1 .! l, r2 .! l))
+    doUncons l (RecPair (r1, r2)) = (RecPair (lazyRemove l r1, lazyRemove l r2), (r1 .! (singLabel l), r2 .! (singLabel l)))
     doCons :: forall ℓ τ1 τ2 ρ1 ρ2. (KnownSymbol ℓ)
-           => Label ℓ -> (RZipPair ρ1 ρ2, (τ1, τ2)) -> RZipPair (Extend ℓ τ1 ρ1) (Extend ℓ τ2 ρ2)
+           => Sing ℓ -> (RZipPair ρ1 ρ2, (τ1, τ2)) -> RZipPair (Extend ℓ τ1 ρ1) (Extend ℓ τ2 ρ2)
     doCons l (RZipPair r, vs) = RZipPair $ extend l vs r
       \\ zipExtendSwap @ℓ @τ1 @ρ1 @τ2 @ρ2
 
@@ -627,8 +630,8 @@ fromLabelsA mk = getCompose $ metamorph @_ @ρ @c @Const @(Const ()) @(Compose f
   where doNil _ = Compose $ pure empty
         doUncons _ _ = Const $ Const ()
         doCons :: forall ℓ τ ρ. (KnownSymbol ℓ, c τ)
-               => Label ℓ -> Const (Compose f Rec ρ) (Proxy τ) -> Compose f Rec (Extend ℓ τ ρ)
-        doCons l (Const (Compose r)) = Compose $ extend l <$> mk @ℓ @τ l <*> r
+               => Sing ℓ -> Const (Compose f Rec ρ) (Proxy τ) -> Compose f Rec (Extend ℓ τ ρ)
+        doCons l (Const (Compose r)) = Compose $ extend (singLabel l) <$> mk @ℓ @τ (singLabel l) <*> r
 
 -- | Initialize a record over a `Map`.
 fromLabelsMapA :: forall c f g ρ. (Applicative f, Forall ρ c, AllUniqueLabels ρ)
