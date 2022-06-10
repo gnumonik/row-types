@@ -9,6 +9,7 @@
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE PolyKinds #-}
 {-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE EmptyCase #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ImpredicativeTypes #-}
 {-# LANGUAGE StandaloneKindSignatures #-}
@@ -34,6 +35,9 @@ import Data.Type.Equality
 import Unsafe.Coerce
 
 import Data.Singletons
+import Prelude.Singletons
+import GHC.TypeLits.Singletons
+import Data.Singletons.Decide
 
 uniqueLabelsUpdate :: forall k (l :: Symbol) (a :: k) (b :: k) (rest :: [LT k])
                     .   AllUniqueLabels (R (l ':-> a ': rest))
@@ -207,5 +211,77 @@ quantifyRowList = \case
 ------ totally unrelated to anything, just an idea i don't want to forget
 
 -- with the new withDict magic we can FINALLY infer C a from p @@ a
-class C (a :: k) (p :: k ~> Type) where
-  p :: (p @@ a)
+type C :: forall k. k -> (k ~> Type) -> Constraint
+class C a p where
+  p :: p @@ a
+
+withC :: forall k (a :: k) (p :: k ~> Type)
+       . p @@ a -> Dict (C a p)
+withC pa = withDict @(p @@ a) @(C a p) pa $ Dict
+
+
+-- this is a bit degenerate because the field is purely phantom...
+-- but that's exactly what we need (I think?)
+data SSLT :: LT k -> Type where
+  SSLT :: forall k (a :: k) (l :: Symbol)
+       . Sing l ->  SSLT (l ':-> a)
+
+data DemLT :: forall k -> Type where
+  DemLT :: forall k (l :: Symbol)
+         . Sing l -> DemLT k
+
+type instance Sing = SSLT
+
+instance SingKind (LT k) where
+  type Demote (LT k) = DemLT k
+
+  fromSing (SSLT l) = DemLT l
+
+  toSing (DemLT l) = SomeSing (SSLT l)
+
+data SRow :: Row k -> Type where
+  SRow :: forall k (ks :: [LT k]). Sing ks -> SRow (R ks)
+
+type instance Sing = SRow
+
+data DRow :: forall k -> Type where
+  DRow :: forall k (r :: Row k)
+        . Sing r -> DRow k
+
+instance SingKind (Row k) where
+  type Demote (Row k) = DRow k
+
+  fromSing sRow = DRow sRow
+
+  toSing (DRow sRow) = SomeSing sRow
+
+-- the idea here is that we're going to rewrite 'FrontExtends' and 'AllUniqueLabels' to be classes with
+-- methods that return predicates, where the predicates will be decideable using defunctionalized type
+-- families. ugh.
+
+-- it might be better to build all of the necessary constraints (i.e. every sequential pair of elements satisfies Extends)
+-- since that implies WellBehaved
+data ExtendsT :: LT k ->  Row k -> Type where
+  ExtendsTNil  :: forall k (lt :: LT k). ExtendsT lt Empty
+
+  ExtendsTCons :: forall k (l :: Symbol) (a :: k) (l' :: Symbol) (b :: k) (rest :: [LT k])
+                    . ( (l < l') ~ True) => ExtendsT (l ':-> a) (R (l' :-> b ': rest))
+
+type Extends = TyCon2 ExtendsT
+
+decideExtends :: forall k lt r. Sing (lt :: LT k) -> Sing (r :: Row k) -> Decision (Extends @@ lt @@ r)
+decideExtends (SSLT sl) = \case
+  (SRow SNil) -> Proved ExtendsTNil
+  (SRow (SCons (SSLT sl') rest)) -> case (sl %< sl') of
+    STrue -> Proved ExtendsTCons
+    SFalse -> Disproved $ \case {}
+
+
+class BetterFrontExtends (lt :: LT k) (r :: Row k) where
+  betterFrontExtends :: Extends @@ lt @@ r
+
+instance BetterFrontExtends lt Empty where
+  betterFrontExtends = ExtendsTNil
+
+instance (l < l') ~ True => BetterFrontExtends (l ':-> t) (R (l' ':-> t' ': rest)) where
+  betterFrontExtends = ExtendsTCons

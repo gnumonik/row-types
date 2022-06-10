@@ -80,39 +80,11 @@ import GHC.TypeLits
 import qualified GHC.TypeLits as TL
 import GHC.Show
 import Data.Singletons
+import GHC.TypeLits.Singletons
 import Data.Singletons.Decide
 import GHC.Magic.Dict
+
 -- NOTE: Remove this once singletons-base is updated for GHC 9.4
-
-type SSymbol :: Symbol -> Type
-data SSymbol (n :: Symbol) = KnownSymbol n => SSym
-type instance Sing = SSymbol
-
-instance KnownSymbol n => SingI n where
-  sing = SSym
-
-instance SingKind Symbol where
-  type Demote Symbol = Text
-  fromSing (SSym :: Sing n) = Text.pack (symbolVal (Proxy :: Proxy n))
-  toSing s = case someSymbolVal (Text.unpack s) of
-               SomeSymbol (_ :: Proxy n) -> SomeSing (SSym :: Sing n)
-
-
-instance SDecide Symbol where
-  (SSym :: Sing n) %~ (SSym :: Sing m)
-    | Just r <- sameSymbol (Proxy :: Proxy n) (Proxy :: Proxy m)
-    = Proved r
-    | otherwise
-    = Disproved (\Refl -> error errStr)
-    where errStr = "Broken Symbol singletons"
-
-
-instance Show (SSymbol s) where
-  showsPrec p s@SSym
-    = showParen (p > appPrec)
-      ( showString "SSym @"
-        . showsPrec appPrec1 (symbolVal s)
-      )
 
 singLabel :: forall (l :: Symbol). Sing l -> Label l
 singLabel _ = Label @l
